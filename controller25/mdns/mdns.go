@@ -1,36 +1,69 @@
 package mdns
 
 import (
-    "log"
-    "os"
+	"log"
+	"net"
+	"time"
 
-    "github.com/grandcat/zeroconf"
+	"github.com/grandcat/zeroconf"
 )
 
 func StartmDNSService(shutdown chan struct{}) {
-    host, err := os.Hostname()
-    if err != nil {
-        log.Printf("Failed to get hostname for mDNS, using default 'op25-pi': %v", err)
-        host = "op25-pi"
-    }
+	instanceName := "OP25MCH" // Fixed instance name
+	serviceType := "_op25mch._tcp"
+	domain := "local."
+	port := 9000
 
-    server, err := zeroconf.Register(
-        host,
-        "_op25mch._tcp",
-        "local.",
-        9000,
-        []string{"txtv=0"},
-        nil,
-    )
-    if err != nil {
-        log.Fatalf("Failed to start mDNS service: %v", err)
-    }
+	// Get all network interfaces
+	ifaces, err := net.Interfaces()
+	if err != nil {
+		log.Printf("Error getting network interfaces: %v", err)
+	}
 
-    log.Printf("mDNS service started. Broadcasting as %s._op25mch._tcp.local.", host)
+	// Log all available interfaces
+	log.Printf("Available network interfaces:")
+	for _, iface := range ifaces {
+		addrs, err := iface.Addrs()
+		if err != nil {
+			continue
+		}
+		log.Printf("- %s (HW: %s, Flags: %v)", iface.Name, iface.HardwareAddr, iface.Flags)
+		for _, addr := range addrs {
+			log.Printf("  %s", addr.String())
+		}
+	}
 
-    <-shutdown
+	// Register service on ALL interfaces (pass nil to zeroconf.Register)
+	server, err := zeroconf.Register(
+		instanceName,
+		serviceType,
+		domain,
+		port,
+		[]string{"txtv=0", "version=1.0"},
+		nil, // Passing nil means all available interfaces
+	)
+	if err != nil {
+		log.Fatalf("Failed to start mDNS service: %v", err)
+	}
 
-    log.Println("Shutting down mDNS service...")
-    server.Shutdown()
-    log.Println("mDNS service shut down.")
+	log.Printf("mDNS service registered as %s.%s%s:%d on all interfaces", instanceName, serviceType, domain, port)
+
+	// Periodically log advertising status
+	go func() {
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ticker.C:
+				log.Printf("mDNS service actively advertising on all interfaces")
+			case <-shutdown:
+				return
+			}
+		}
+	}()
+
+	<-shutdown
+	log.Println("Shutting down mDNS service...")
+	server.Shutdown()
+	log.Println("mDNS service shut down.")
 }

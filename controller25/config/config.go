@@ -42,6 +42,7 @@ func StartOp25ProcessUDP() (*exec.Cmd, io.ReadCloser, io.ReadCloser) {
         "-X",
         "-V",
         "-v", "9",
+        "-l", "http:0.0.0.0:8080",
         "-w",
         "-W", "127.0.0.1",
     }
