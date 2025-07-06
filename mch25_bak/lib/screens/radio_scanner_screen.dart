@@ -138,40 +138,67 @@ class ScannerScreen extends StatelessWidget {
 
     // Watch the API service for live data updates
     final apiService = context.watch<Op25ApiService>();
+    final op25Data = apiService.data;
 
-    // ---- START: UPDATED DATA LOGIC ----
+    // Safely extract data with fallbacks for when data is not yet available
+    final channelInfo = op25Data?.channelInfo?.channels.values.firstOrNull;
+    final trunkInfo = op25Data?.trunkInfo;
 
-    // Use the new getter for reliable access to the current channel
-    final channelInfo = apiService.currentChannelInfo;
-    final trunkInfo = apiService.data?.trunkInfo;
-
+    // Use the frequency in Hz directly from the source for the key to avoid float errors
+    final currentFreqHz = channelInfo?.freq ?? 0.0;
     // Calculate the MHz value for display purposes
-    final currentFreq = (channelInfo?.freq ?? 0.0) / 1000000;
+    final currentFreq = currentFreqHz / 1000000;
     final talkgroup = channelInfo?.tag ?? 'Scanning...';
 
-    // --- FIXED: This block is now safe from "Bad state: No element" errors ---
-    MapEntry<String, FrequencyInfo>? controlChannelEntry;
-    if (trunkInfo?.frequencyData.isNotEmpty ?? false) {
-      // Use .where() and .firstOrNull for safety
-      controlChannelEntry = trunkInfo!.frequencyData.entries
-          .where((e) => e.value.type == 'control')
-          .firstOrNull;
-
-      // If no control channel is found, fallback to the first entry in the list
-      controlChannelEntry ??= trunkInfo.frequencyData.entries.first;
-    }
-
-    final controlChannelFreq = controlChannelEntry?.key ?? '0.0';
-    final controlChannelMhz = (double.tryParse(controlChannelFreq) ?? 0.0) / 1000000;
-
-    // Get the data for the specific frequency that is currently active
-    final currentFreqKey = (channelInfo?.freq ?? 0.0).toInt().toString();
+    final currentFreqKey = currentFreqHz.toInt().toString();
     final currentFreqData = trunkInfo?.frequencyData[currentFreqKey];
 
-    final mode = currentFreqData?.mode ?? '-';
-    final lastActivity = currentFreqData?.lastActivity.trim() ?? '-';
+    final FrequencyInfo emptyFreqInfo = FrequencyInfo(
+      type: '',
+      lastActivity: '',
+      mode: '',
+      counter: 0,
+      tgids: [],
+      tags: [],
+      srcaddrs: [],
+      srctags: []
+    );
 
-    // ---- END: UPDATED DATA LOGIC ----
+    // Find the control channel entry, or use the lowest frequency as fallback
+    MapEntry<String, FrequencyInfo>? controlChannelEntry;
+    if (trunkInfo?.frequencyData != null && trunkInfo!.frequencyData.isNotEmpty) {
+      var controlCandidates = trunkInfo!.frequencyData.entries
+          .where((e) => e.value.type == 'control')
+          .toList();
+      if (controlCandidates.isNotEmpty) {
+        controlChannelEntry = controlCandidates.first;
+      } else {
+        // fallback: lowest frequency
+        controlChannelEntry = trunkInfo!.frequencyData.entries.reduce(
+          (a, b) => int.parse(a.key) < int.parse(b.key) ? a : b,
+        );
+      }
+    }
+    final controlChannelFreq = controlChannelEntry?.key ?? '0.0';
+    final controlChannelMhz = (double.tryParse(controlChannelFreq) ?? 0.0) / 1000000;
+    final FrequencyInfo controlChannelData = controlChannelEntry?.value ?? emptyFreqInfo;
+
+    // New fallback logic for mode and lastActivity
+    final mode = currentFreqData?.mode?.isNotEmpty == true
+        ? currentFreqData!.mode
+        : (controlChannelData.mode?.isNotEmpty == true ? controlChannelData.mode : '-');
+
+    final lastActivity = currentFreqData?.lastActivity?.isNotEmpty == true
+        ? currentFreqData!.lastActivity.trim()
+        : (controlChannelData.lastActivity?.isNotEmpty == true ? controlChannelData.lastActivity.trim() : '-');
+
+    // Debug statements to help diagnose
+    debugPrint('Trunk FreqData Keys: ${trunkInfo?.frequencyData.keys}');
+    trunkInfo?.frequencyData.forEach((k, v) {
+      debugPrint('Key: $k, type: ${v.type}, lastActivity: ${v.lastActivity}, mode: ${v.mode}');
+    });
+    debugPrint('CurrentFreqHz: $currentFreqHz, CurrentFreqKey: $currentFreqKey');
+    debugPrint('ControlChannelFreq: $controlChannelFreq, ControlChannelMhz: $controlChannelMhz');
 
     double freqFontSize = size.width * 0.11;
     double ccFontSize = size.width * 0.04;
@@ -182,7 +209,6 @@ class ScannerScreen extends StatelessWidget {
       talkgroupFontSize = 22;
     }
 
-    // --- The UI Layout below is unchanged ---
     return Padding(
       padding: const EdgeInsets.fromLTRB(18, 10, 18, 6),
       child: Column(

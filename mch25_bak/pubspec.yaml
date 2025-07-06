@@ -41,7 +41,10 @@ dependencies:
   provider: ^6.0.0     # For simple state management
   intl: ^0.20.2
   flutter_secure_storage: ^9.0.0
-  xml: ^6.3.0
+  radioreference_api_dart:
+    git:
+      url: https://github.com/SarahRoseLives/RadioReference_API_Dart.git
+      ref: main
 
 dev_dependencies:
   flutter_test:

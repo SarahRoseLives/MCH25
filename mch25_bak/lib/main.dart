@@ -1,3 +1,5 @@
+// lib/main.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:provider/provider.dart';
@@ -9,19 +11,15 @@ import 'service/mdns_scanner_service.dart';
 import 'screens/radio_scanner_screen.dart';
 import 'wizard/onboarding_wizard.dart';
 import 'audio/udp_audio_player_service.dart';
-import 'service/op25_api_service.dart';
-import 'service/op25_control_service.dart'; // <-- Import new control service
-import 'service/radioreference_service.dart';
+import 'service/op25_api_service.dart'; // <-- Import new service
 
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // --- Instantiate services ---
   final appConfig = AppConfig();
   final mDNScanner = mDNScannerService();
   final audioService = AudioStreamPlayerService();
-  final op25ApiService = Op25ApiService();
-  final op25ControlService = Op25ControlService(); // <-- Instantiate new service
+  final op25ApiService = Op25ApiService(); // <-- Instantiate new service
 
   // Start discovery
   mDNScanner.startDiscovery(appConfig);
@@ -35,10 +33,7 @@ void main() {
   audioService.start(appConfig);
 
   // Start OP25 API service so it polls for data
-  op25ApiService.start(appConfig);
-
-  // Initialize the OP25 Control Service
-  op25ControlService.initialize(appConfig); // <-- Initialize new service
+  op25ApiService.start(appConfig); // <-- Start the new service
 
   SystemChrome.setPreferredOrientations([
     DeviceOrientation.landscapeLeft,
@@ -50,9 +45,7 @@ void main() {
           ChangeNotifierProvider.value(value: appConfig),
           ChangeNotifierProvider.value(value: mDNScanner),
           Provider.value(value: audioService),
-          ChangeNotifierProvider.value(value: op25ApiService),
-          ChangeNotifierProvider.value(value: op25ControlService), // <-- Provide new service
-          ChangeNotifierProvider(create: (_) => RadioReferenceService()),
+          ChangeNotifierProvider.value(value: op25ApiService), // <-- Provide the new service
         ],
         child: MobileRadioScannerApp(),
       ),
@@ -90,31 +83,15 @@ class _MainScreenState extends State<MainScreen> {
   @override
   void initState() {
     super.initState();
-    _loadPrefsAndAutoStart();
+    _loadPrefs();
   }
 
-  Future<void> _loadPrefsAndAutoStart() async {
+  Future<void> _loadPrefs() async {
     final prefs = await SharedPreferences.getInstance();
-    final wizardCompleted = prefs.getBool('wizardCompleted') ?? false;
-
-    if (!wizardCompleted) {
-      // First run, show wizard
-      setState(() {
-        _showWizard = true;
-        _prefsLoaded = true;
-      });
-    } else {
-      // Not first run, show main screen and attempt to auto-start OP25
-      setState(() {
-        _showWizard = false;
-        _prefsLoaded = true;
-      });
-      // Use the provided Op25ControlService to attempt auto-start
-      // We add a post-frame callback to ensure the context is ready
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-         Provider.of<Op25ControlService>(context, listen: false).attemptAutoStart();
-      });
-    }
+    setState(() {
+      _showWizard = !(prefs.getBool('wizardCompleted') ?? false);
+      _prefsLoaded = true;
+    });
   }
 
   void _completeWizard() async {

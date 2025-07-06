@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'dart:async';
 import 'dart:convert';
 import 'package:http/http.dart' as http;
-import 'package:mch25/service/op25_control_service.dart';
 import 'package:provider/provider.dart';
 import '../config.dart';
 
@@ -21,8 +20,6 @@ class _LogScreenState extends State<LogScreen> {
   bool _connected = false;
   http.Client? _client;
   bool _isConnecting = false;
-  int _tapCount = 0;
-  Timer? _tapTimer;
 
   @override
   void initState() {
@@ -49,13 +46,11 @@ class _LogScreenState extends State<LogScreen> {
 
   @override
   void dispose() {
-    Provider.of<AppConfig>(context, listen: false)
-        .removeListener(_handleConfigChange);
+    Provider.of<AppConfig>(context, listen: false).removeListener(_handleConfigChange);
     _streamSub?.cancel();
     _client?.close();
     _scrollController.removeListener(_handleScroll);
     _scrollController.dispose();
-    _tapTimer?.cancel();
     super.dispose();
   }
 
@@ -183,79 +178,8 @@ class _LogScreenState extends State<LogScreen> {
     });
   }
 
-  void _scrollToBottom() {
-    if (_scrollController.hasClients) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 300),
-        curve: Curves.easeOut,
-      );
-    }
-  }
-
-  void _handleDoubleTap() {
-    _scrollToBottom();
-  }
-
-  void _handleTap() {
-    _tapCount += 1;
-
-    if (_tapCount == 2) {
-      _handleDoubleTap();
-      _tapCount = 0;
-      _tapTimer?.cancel();
-    } else {
-      _tapTimer?.cancel();
-      _tapTimer = Timer(const Duration(milliseconds: 300), () {
-        _tapCount = 0;
-      });
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    // Watch the control service to know if OP25 is running
-    final controlService = context.watch<Op25ControlService>();
-    final isOp25Running = controlService.isRunning;
-
-    final showScrollButton = !_atBottom && _logLines.isNotEmpty;
-
-    // If OP25 is not running, show a dedicated message.
-    if (!isOp25Running) {
-      return Scaffold(
-        backgroundColor: Colors.black,
-        body: SafeArea(
-          child: Center(
-            child: Padding(
-              padding: const EdgeInsets.all(24.0),
-              child: Column(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  const Icon(Icons.power_off_outlined,
-                      color: Colors.white54, size: 48),
-                  const SizedBox(height: 16),
-                  const Text(
-                    "OP25 Not Running",
-                    style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 22,
-                        fontWeight: FontWeight.bold),
-                  ),
-                  const SizedBox(height: 8),
-                  const Text(
-                    "Start OP25 from the Settings screen to see logs.",
-                    textAlign: TextAlign.center,
-                    style: TextStyle(color: Colors.white70, fontSize: 16),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      );
-    }
-
-    // If OP25 is running, show the standard log screen UI.
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
@@ -270,58 +194,39 @@ class _LogScreenState extends State<LogScreen> {
                     const Icon(Icons.warning, color: Colors.white),
                     const SizedBox(width: 8),
                     Text(
-                      "Connecting to log stream in $_retryDelay seconds...",
+                      "Reconnecting in $_retryDelay seconds...",
                       style: const TextStyle(color: Colors.white),
                     ),
                   ],
                 ),
               ),
             Expanded(
-              child: GestureDetector(
-                onDoubleTap: _handleDoubleTap,
-                onTap: _handleTap,
-                child: _logLines.isEmpty
-                    ? Center(
-                        child: Text(
-                          _connected
-                              ? "Waiting for logs..."
-                              : "Connecting to log stream...",
-                          style: const TextStyle(
-                              color: Colors.white, fontSize: 18),
-                        ),
-                      )
-                    : ListView.builder(
-                        controller: _scrollController,
-                        itemCount: _logLines.length,
-                        itemBuilder: (context, index) {
-                          final log = _logLines[index];
-                          return Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            child: Text(
-                              log,
-                              style: _getLogStyle(log),
-                            ),
-                          );
-                        },
+              child: _logLines.isEmpty
+                  ? Center(
+                      child: Text(
+                        _connected ? "Waiting for logs..." : "Connecting...",
+                        style:
+                            const TextStyle(color: Colors.white, fontSize: 18),
                       ),
-              ),
+                    )
+                  : ListView.builder(
+                      controller: _scrollController,
+                      itemCount: _logLines.length,
+                      itemBuilder: (context, index) {
+                        final log = _logLines[index];
+                        return Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            log,
+                            style: _getLogStyle(log),
+                          ),
+                        );
+                      },
+                    ),
             ),
-            if (showScrollButton)
-              Container(
-                alignment: Alignment.centerRight,
-                padding: const EdgeInsets.only(right: 16, bottom: 12),
-                child: FloatingActionButton(
-                  mini: true,
-                  backgroundColor: Colors.grey[900],
-                  child:
-                      const Icon(Icons.arrow_downward, color: Colors.white),
-                  onPressed: _scrollToBottom,
-                  tooltip: "Scroll to bottom",
-                ),
-              ),
           ],
         ),
       ),

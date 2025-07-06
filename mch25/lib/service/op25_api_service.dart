@@ -2,22 +2,33 @@ import 'dart:async';
 import 'dart:convert';
 import 'package:flutter/foundation.dart';
 import 'package:http/http.dart' as http;
-import '../config.dart';
+import '../config.dart'; // Your app's config file
 
-//region Data Models
+//region Expanded Data Models
 // Main container for all data received from the API
 class Op25Data {
   TrunkUpdate? trunkInfo;
   ChannelUpdate? channelInfo;
   List<CallLogEntry> callLog;
+  RxUpdate? rxInfo;
+  TerminalConfig? terminalConfig;
+  FullConfig? fullConfig;
 
-  Op25Data({this.trunkInfo, this.channelInfo, this.callLog = const []});
+  Op25Data({
+    this.trunkInfo,
+    this.channelInfo,
+    this.callLog = const [],
+    this.rxInfo,
+    this.terminalConfig,
+    this.fullConfig,
+  });
 }
 
 class TrunkUpdate {
   final String nac;
   final String systemName;
   final String systemType;
+  final String? callsign;
   final String wacn;
   final String sysid;
   final String rfid;
@@ -25,11 +36,13 @@ class TrunkUpdate {
   final Map<String, FrequencyInfo> frequencyData;
   final Map<String, dynamic> adjacentSites;
   final Map<String, dynamic> patches;
+  final List<BandPlanEntry> bandPlan;
 
   TrunkUpdate({
     required this.nac,
     required this.systemName,
     required this.systemType,
+    this.callsign,
     required this.wacn,
     required this.sysid,
     required this.rfid,
@@ -37,13 +50,21 @@ class TrunkUpdate {
     required this.frequencyData,
     required this.adjacentSites,
     required this.patches,
+    this.bandPlan = const [],
   });
 
   factory TrunkUpdate.fromJson(String nac, Map<String, dynamic> json) {
-    Map<String, FrequencyInfo> freqs = {};
+    var freqs = <String, FrequencyInfo>{};
     if (json['frequency_data'] is Map) {
       (json['frequency_data'] as Map).forEach((key, value) {
         freqs[key] = FrequencyInfo.fromJson(value);
+      });
+    }
+
+    var bp = <BandPlanEntry>[];
+    if (json['band_plan'] is Map) {
+      (json['band_plan'] as Map).forEach((key, value) {
+        bp.add(BandPlanEntry.fromJson(key, value));
       });
     }
 
@@ -51,6 +72,7 @@ class TrunkUpdate {
       nac: nac,
       systemName: json['system'] ?? 'N/A',
       systemType: json['type'] ?? 'N/A',
+      callsign: json['callsign'],
       wacn: json['wacn']?.toString() ?? '-',
       sysid: json['sysid']?.toRadixString(16).toUpperCase() ?? '-',
       rfid: json['rfid']?.toString() ?? '-',
@@ -58,13 +80,14 @@ class TrunkUpdate {
       frequencyData: freqs,
       adjacentSites: json['adjacent_data'] ?? {},
       patches: json['patch_data'] ?? {},
+      bandPlan: bp,
     );
   }
 }
 
 class FrequencyInfo {
   final String type;
-  final String lastActivity; // <-- CHANGED FROM int TO String
+  final String lastActivity;
   final String mode;
   final int counter;
   final List<int?> tgids;
@@ -86,8 +109,8 @@ class FrequencyInfo {
   factory FrequencyInfo.fromJson(Map<String, dynamic> json) {
     return FrequencyInfo(
       type: json['type'] ?? 'voice',
-      lastActivity: json['last_activity']?.toString() ?? '0', // Ensure string conversion
-      mode: json['mode']?.toString() ?? '-', // Ensure string conversion
+      lastActivity: json['last_activity']?.toString() ?? '0',
+      mode: json['mode']?.toString() ?? '-',
       counter: json['counter'] ?? 0,
       tgids: List<int?>.from(json['tgids'] ?? []),
       tags: List<String?>.from(json['tags'] ?? []),
@@ -104,8 +127,9 @@ class ChannelUpdate {
   ChannelUpdate({required this.channelIds, required this.channels});
 
   factory ChannelUpdate.fromJson(Map<String, dynamic> json) {
-    Map<String, ChannelInfo> channelMap = {};
-    List<String> idList = List<String>.from(json['channels']?.map((c) => c.toString()) ?? []);
+    var channelMap = <String, ChannelInfo>{};
+    List<String> idList =
+        List<String>.from(json['channels']?.map((c) => c.toString()) ?? []);
 
     for (var id in idList) {
       if (json[id] is Map) {
@@ -128,6 +152,9 @@ class ChannelInfo {
   final int encrypted;
   final int emergency;
   final String tdma;
+  final int? holdTgid;
+  final bool? capture;
+  final int? error;
 
   ChannelInfo({
     required this.name,
@@ -140,6 +167,9 @@ class ChannelInfo {
     required this.encrypted,
     required this.emergency,
     required this.tdma,
+    this.holdTgid,
+    this.capture,
+    this.error,
   });
 
   factory ChannelInfo.fromJson(Map<String, dynamic> json) {
@@ -154,6 +184,9 @@ class ChannelInfo {
       encrypted: json['encrypted'] ?? 0,
       emergency: json['emergency'] ?? 0,
       tdma: json['tdma']?.toString() ?? '-',
+      holdTgid: json['hold_tgid'],
+      capture: json['capture'],
+      error: json['error'],
     );
   }
 }
@@ -167,6 +200,9 @@ class CallLogEntry {
   final String rtag;
   final double freq;
   final int slot;
+  final int? prio;
+  final String? rcvr;
+  final String? rcvrtag;
 
   CallLogEntry({
     required this.time,
@@ -177,6 +213,9 @@ class CallLogEntry {
     required this.rtag,
     required this.freq,
     required this.slot,
+    this.prio,
+    this.rcvr,
+    this.rcvrtag,
   });
 
   factory CallLogEntry.fromJson(Map<String, dynamic> json) {
@@ -189,9 +228,144 @@ class CallLogEntry {
       rtag: json['rtag'] ?? '',
       freq: (json['freq'] ?? 0.0).toDouble(),
       slot: json['slot'] ?? 0,
+      prio: json['prio'],
+      rcvr: json['rcvr'],
+      rcvrtag: json['rcvrtag'],
     );
   }
 }
+
+class RxUpdate {
+  final List<String> files;
+  final int? error;
+  final double? fineTune;
+
+  RxUpdate({this.files = const [], this.error, this.fineTune});
+
+  factory RxUpdate.fromJson(Map<String, dynamic> json) {
+    return RxUpdate(
+      files: List<String>.from(json['files'] ?? []),
+      error: json['error'],
+      fineTune: json['fine_tune']?.toDouble(),
+    );
+  }
+}
+
+class TerminalConfig {
+  final List<SmartColor> smartColors;
+  final int largeTuningStep;
+  final int smallTuningStep;
+
+  TerminalConfig({
+    this.smartColors = const [],
+    this.largeTuningStep = 1200,
+    this.smallTuningStep = 100,
+  });
+
+  factory TerminalConfig.fromJson(Map<String, dynamic> json) {
+    var colors = <SmartColor>[];
+    if (json['smart_colors'] is List) {
+      colors = (json['smart_colors'] as List)
+          .map((item) => SmartColor.fromJson(item))
+          .toList();
+    }
+    return TerminalConfig(
+      smartColors: colors,
+      largeTuningStep: json['tuning_step_large'] ?? 1200,
+      smallTuningStep: json['tuning_step_small'] ?? 100,
+    );
+  }
+}
+
+class SmartColor {
+  final List<String> keywords;
+  final String color;
+
+  SmartColor({required this.keywords, required this.color});
+
+  factory SmartColor.fromJson(Map<String, dynamic> json) {
+    return SmartColor(
+      keywords: List<String>.from(json['keywords'] ?? []),
+      color: json['color'] ?? '#FFFFFF',
+    );
+  }
+}
+
+class FullConfig {
+  final Map<String, List<Preset>> presetsBySysname;
+  final Map<String, dynamic> siteAliases;
+
+  FullConfig({this.presetsBySysname = const {}, this.siteAliases = const {}});
+
+  factory FullConfig.fromJson(Map<String, dynamic> json) {
+    var presetsMap = <String, List<Preset>>{};
+    var aliasMap = <String, dynamic>{};
+
+    if (json['trunking']?['chans'] is List) {
+      for (var chan in json['trunking']['chans']) {
+        final sysname = chan['sysname'];
+        if (sysname != null) {
+          if (chan['presets'] is List) {
+            presetsMap[sysname] = (chan['presets'] as List)
+                .map((p) => Preset.fromJson(p))
+                .toList();
+          }
+          if (chan['site_alias'] is Map) {
+             aliasMap[sysname.toUpperCase()] = chan['site_alias'];
+          }
+        }
+      }
+    }
+    return FullConfig(presetsBySysname: presetsMap, siteAliases: aliasMap);
+  }
+}
+
+class Preset {
+  final int id;
+  final String label;
+  final int tgid;
+
+  Preset({required this.id, required this.label, required this.tgid});
+
+  factory Preset.fromJson(Map<String, dynamic> json) {
+    return Preset(
+      id: json['id'] ?? 0,
+      label: json['label'] ?? 'Preset',
+      tgid: json['tgid'] ?? 0,
+    );
+  }
+}
+
+class BandPlanEntry {
+  final String id;
+  final String type;
+  final double frequency;
+  final double txOffset;
+  final double spacing;
+  final int slots;
+
+  BandPlanEntry({
+    required this.id,
+    required this.type,
+    required this.frequency,
+    required this.txOffset,
+    required this.spacing,
+    required this.slots,
+  });
+
+  factory BandPlanEntry.fromJson(String id, Map<String, dynamic> json) {
+    final mode = json['tdma'] ?? 1;
+    return BandPlanEntry(
+      id: id,
+      type: mode > 1 ? "TDMA" : "FDMA",
+      frequency: (json['frequency'] ?? 0.0) / 1000000.0,
+      txOffset: (json['offset'] ?? 0.0) / 1000000.0,
+      spacing: (json['step'] ?? 0.0) / 1000.0,
+      slots: mode,
+    );
+  }
+}
+
 //endregion
 
 class Op25ApiService extends ChangeNotifier {
@@ -199,6 +373,7 @@ class Op25ApiService extends ChangeNotifier {
   Timer? _timer;
   final http.Client _client = http.Client();
 
+  //region State Properties
   Op25Data? _data;
   Op25Data? get data => _data;
 
@@ -207,9 +382,33 @@ class Op25ApiService extends ChangeNotifier {
 
   bool _isFetching = false;
 
+  int _channelIndex = 0;
+  int get channelIndex => _channelIndex;
+
+  int _httpErrors = 0;
+  int get httpErrors => _httpErrors;
+
+  final List<Map<String, dynamic>> _commandQueue = [];
+  static const int _commandQueueLimit = 5;
+  //endregion
+
+  ChannelInfo? get currentChannelInfo {
+    if (data?.channelInfo == null || data!.channelInfo!.channelIds.isEmpty) {
+      return null;
+    }
+    final channelId = data!.channelInfo!.channelIds.elementAtOrNull(channelIndex);
+    if (channelId == null) return null;
+    return data!.channelInfo!.channels[channelId];
+  }
+
+  //region Public Methods for UI Interaction
   void start(AppConfig appConfig) {
     _appConfig = appConfig;
     _timer?.cancel();
+    // Initial fetch for config data
+    getFullConfig();
+    getTerminalConfig();
+    // Start periodic updates
     _timer = Timer.periodic(const Duration(seconds: 1), (_) => _fetchData());
     debugPrint("OP25 API Service Started");
   }
@@ -219,17 +418,91 @@ class Op25ApiService extends ChangeNotifier {
     debugPrint("OP25 API Service Stopped");
   }
 
+  void nextChannel() {
+      final int channelCount = _data?.channelInfo?.channelIds.length ?? 0;
+      if (channelCount == 0) return;
+      _channelIndex = (_channelIndex + 1) % channelCount;
+      notifyListeners();
+  }
+
+  void previousChannel() {
+      final int channelCount = _data?.channelInfo?.channelIds.length ?? 0;
+      if (channelCount == 0) return;
+      _channelIndex = (_channelIndex - 1 + channelCount) % channelCount;
+      notifyListeners();
+  }
+
+  void tune(int amount) {
+    _sendCommand('adj_tune', amount);
+  }
+
+  void togglePlot(String plotType) {
+    _sendCommand('toggle_plot', plotType);
+  }
+
+  void setHold(int tgid) {
+    if (tgid > 0) {
+      _sendCommand("whitelist", tgid);
+    }
+    _sendCommand('hold', tgid);
+  }
+
+  void setLockout(int tgid) {
+    _sendCommand('lockout', tgid);
+  }
+
+  void clearScanRules() {
+    setHold(0);
+  }
+
+  void toggleCapture() {
+   _sendCommand('capture');
+  }
+
+  void dumpTGs() => _sendCommand('dump_tgids');
+  void dumpTracking() => _sendCommand('dump_tracking');
+  void dumpBuffer() => _sendCommand('dump_buffer');
+
+  void getFullConfig() => _sendCommand('get_full_config');
+  void getTerminalConfig() => _sendCommand('get_terminal_config');
+  //endregion
+
+  //region Core Logic
+
+  // --- FIXED: This method now ensures arg1 and arg2 are always present ---
+  void _sendCommand(String command, [dynamic arg1, dynamic arg2]) {
+    final Map<String, dynamic> cmd = {"command": command};
+
+    // Ensure arg1 is always included, defaulting to 0 if not provided.
+    cmd['arg1'] = arg1 ?? 0;
+
+    // Preserve the dynamic logic for arg2 but ensure it's always included.
+    final currentChannelId = _data?.channelInfo?.channelIds.elementAtOrNull(_channelIndex);
+    final finalArg2 = arg2 ?? (currentChannelId != null ? int.tryParse(currentChannelId) ?? 0 : 0);
+    cmd['arg2'] = finalArg2;
+
+    if (_commandQueue.length >= _commandQueueLimit) {
+        _commandQueue.removeAt(0);
+    }
+    _commandQueue.add(cmd);
+
+    _processCommandQueue();
+  }
+
   Future<void> _fetchData() async {
-    if (_isFetching || _appConfig == null || _appConfig!.serverIp.isEmpty) return;
+    _sendCommand("update");
+  }
+
+  Future<void> _processCommandQueue() async {
+    if (_isFetching || _appConfig == null || _appConfig!.serverIp.isEmpty || _commandQueue.isEmpty) return;
     _isFetching = true;
 
-    final url = Uri.parse(_appConfig!.op25ApiUrl);
-    final requestBody = json.encode([
-      {"command": "update", "arg1": 0, "arg2": 0}
-    ]);
+    final url = Uri.parse(_appConfig!.op25DataApiUrl); // <-- CORRECTED: Use data URL
+    final List<Map<String, dynamic>> commandsToSend = List.from(_commandQueue);
+    _commandQueue.clear();
 
-    // This logging is very helpful, so we'll leave it for now.
-    // debugPrint("OP25 API DEBUG: Fetching data from $url");
+    final requestBody = json.encode(commandsToSend);
+    //debugPrint("Sending command(s): $requestBody"); // For diagnostics
 
     try {
       final response = await _client.post(
@@ -238,64 +511,65 @@ class Op25ApiService extends ChangeNotifier {
         body: requestBody,
       ).timeout(const Duration(seconds: 2));
 
-      // debugPrint("OP25 API DEBUG: Response Status: ${response.statusCode}");
-
       if (response.statusCode == 200) {
         if (response.body.isNotEmpty) {
-            // debugPrint("OP25 API DEBUG: Response Body: ${response.body}");
-            final List<dynamic> responseData = json.decode(response.body);
-            _parseResponse(responseData);
-            _error = '';
+          final List<dynamic> responseData = json.decode(response.body);
+          _parseResponse(responseData);
+          _error = '';
         } else {
-             // debugPrint("OP25 API DEBUG: Received empty response body.");
-            _error = "Received empty response from server.";
+          _error = "Received empty response from server.";
         }
       } else {
+        _httpErrors++;
         _error = "Server Error: ${response.statusCode}";
-        // debugPrint("OP25 API DEBUG: $_error");
       }
     } catch (e) {
+      _httpErrors++;
       _error = "Connection Error: ${e.toString()}";
-       // debugPrint("OP25 API DEBUG: $_error");
+    } finally {
+      _isFetching = false;
+      notifyListeners();
     }
-
-    // Debug: print trunkInfo and frequencyData if present
-    if (_data?.trunkInfo != null) {
-      debugPrint('Trunk Info: ${_data!.trunkInfo!.toString()}');
-      debugPrint('Frequency Data: ${_data!.trunkInfo!.frequencyData.toString()}');
-    }
-
-    _isFetching = false;
-    notifyListeners();
   }
 
   void _parseResponse(List<dynamic> responseList) {
     _data ??= Op25Data();
 
     for (var item in responseList) {
-      if (item is Map<String, dynamic> && item.containsKey('json_type')) {
-        final String jsonType = item['json_type'];
-        // debugPrint("OP25 API DEBUG: Parsing json_type: $jsonType");
+      if (item is! Map<String, dynamic> || !item.containsKey('json_type')) continue;
 
-        switch (jsonType) {
-          case 'trunk_update':
-            item.forEach((key, value) {
-              if (key != 'json_type' && value is Map<String, dynamic>) {
-                _data!.trunkInfo = TrunkUpdate.fromJson(key, value);
-              }
-            });
-            break;
-          case 'channel_update':
-            _data!.channelInfo = ChannelUpdate.fromJson(item);
-            break;
-          case 'call_log':
-            if (item['log'] is List) {
-              _data!.callLog = (item['log'] as List)
-                  .map((logItem) => CallLogEntry.fromJson(logItem))
-                  .toList();
+      final String jsonType = item['json_type'];
+
+      switch (jsonType) {
+        case 'trunk_update':
+          item.forEach((key, value) {
+            if (key != 'json_type' && value is Map<String, dynamic>) {
+              _data!.trunkInfo = TrunkUpdate.fromJson(key, value);
             }
-            break;
-        }
+          });
+          break;
+        case 'channel_update':
+          _data!.channelInfo = ChannelUpdate.fromJson(item);
+          break;
+        case 'call_log':
+          if (item['log'] is List) {
+            _data!.callLog = (item['log'] as List)
+                .map((logItem) => CallLogEntry.fromJson(logItem))
+                .toList();
+          }
+          break;
+        case 'rx_update':
+          _data!.rxInfo = RxUpdate.fromJson(item);
+          break;
+        case 'terminal_config':
+          _data!.terminalConfig = TerminalConfig.fromJson(item);
+          break;
+        case 'full_config':
+          _data!.fullConfig = FullConfig.fromJson(item);
+          break;
+        case 'plot':
+        case 'change_freq':
+          break;
       }
     }
   }
@@ -306,4 +580,5 @@ class Op25ApiService extends ChangeNotifier {
     _client.close();
     super.dispose();
   }
+  //endregion
 }
